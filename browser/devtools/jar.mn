@@ -20,6 +20,7 @@ browser.jar:
     content/browser/devtools/styleeditor.xul                           (styleeditor/styleeditor.xul)
     content/browser/devtools/styleeditor.css                           (styleeditor/styleeditor.css)
     content/browser/devtools/computedview.xhtml                        (styleinspector/computedview.xhtml)
+    content/browser/devtools/computedview.css                          (styleinspector/computedview.css)
     content/browser/devtools/cssruleview.xhtml                         (styleinspector/cssruleview.xhtml)
     content/browser/devtools/ruleview.css                              (styleinspector/ruleview.css)
     content/browser/devtools/layoutview/view.js                        (layoutview/view.js)
