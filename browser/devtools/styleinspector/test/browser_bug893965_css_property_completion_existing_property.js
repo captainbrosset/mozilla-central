@@ -103,6 +103,7 @@ function checkStateAndMoveOn(index) {
   else {
     editor.once("after-suggest", checkState);
   }
+
   EventUtils.synthesizeKey(key, {}, ruleViewWindow);
 }
 
