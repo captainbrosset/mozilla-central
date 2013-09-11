@@ -19,6 +19,7 @@ const {UndoStack} = require("devtools/shared/undo");
 const {editableField, InplaceEditor} = require("devtools/shared/inplace-editor");
 const {gDevTools} = Cu.import("resource:///modules/devtools/gDevTools.jsm", {});
 const promise = require("sdk/core/promise");
+const {Tooltip} = require("devtools/shared/widgets/Tooltip");
 
 Cu.import("resource://gre/modules/devtools/LayoutHelpers.jsm");
 Cu.import("resource://gre/modules/devtools/Templater.jsm");
@@ -49,9 +50,11 @@ loader.lazyGetter(this, "AutocompletePopup", () => {
  * @param iframe aFrame
  *        An iframe in which the caller has kindly loaded markup-view.xhtml.
  */
-function MarkupView(aInspector, aFrame, aControllerWindow) {
-  this._inspector = aInspector;
-  this.walker = this._inspector.walker;
+function MarkupView(aInspector, aFrame, aControllerWindow)
+{
+  this.inspector = aInspector;
+  this.walker = this.inspector.walker;
+
   this._frame = aFrame;
   this.doc = this._frame.contentDocument;
   this._elt = this.doc.querySelector("#root");
@@ -81,7 +84,7 @@ function MarkupView(aInspector, aFrame, aControllerWindow) {
   this.walker.on("mutations", this._boundMutationObserver);
 
   this._boundOnNewSelection = this._onNewSelection.bind(this);
-  this._inspector.selection.on("new-node-front", this._boundOnNewSelection);
+  this.inspector.selection.on("new-node-front", this._boundOnNewSelection);
   this._onNewSelection();
 
   this._boundKeyDown = this._onKeyDown.bind(this);
@@ -147,10 +150,10 @@ MarkupView.prototype = {
    * Highlight the inspector selected node.
    */
   _onNewSelection: function() {
-    let done = this._inspector.updating("markup-view");
-    if (this._inspector.selection.isNode()) {
-      this.showNode(this._inspector.selection.nodeFront, true).then(() => {
-        this.markNodeAsSelected(this._inspector.selection.nodeFront);
+    let done = this.inspector.updating("markup-view");
+    if (this.inspector.selection.isNode()) {
+      this.showNode(this.inspector.selection.nodeFront, true).then(() => {
+        this.markNodeAsSelected(this.inspector.selection.nodeFront);
         done();
       });
     } else {
@@ -335,11 +338,11 @@ MarkupView.prototype = {
 
     let node = aContainer.node;
     this.markNodeAsSelected(node);
-    this._inspector.selection.setNodeFront(node, "treepanel");
+    this.inspector.selection.setNodeFront(node, "treepanel");
     // This event won't be fired if the node is the same. But the highlighter
     // need to lock the node if it wasn't.
-    this._inspector.selection.emit("new-node");
-    this._inspector.selection.emit("new-node-front");
+    this.inspector.selection.emit("new-node");
+    this.inspector.selection.emit("new-node-front");
 
     if (!aIgnoreFocus) {
       aContainer.focus();
@@ -425,11 +428,12 @@ MarkupView.prototype = {
     }
 
     if (requiresLayoutChange) {
-      this._inspector.immediateLayoutChange();
+      this.inspector.immediateLayoutChange();
     }
+
     this._waitForChildren().then(() => {
       this._flashMutatedNodes(aMutations);
-      this._inspector.emit("markupmutation");
+      this.inspector.emit("markupmutation");
     });
   },
 
@@ -608,9 +612,10 @@ MarkupView.prototype = {
   /**
    * Called when the markup panel initiates a change on a node.
    */
-  nodeChanged: function(aNode) {
-    if (aNode === this._inspector.selection.nodeFront) {
-      this._inspector.change("markupview");
+  nodeChanged: function MT_nodeChanged(aNode)
+  {
+    if (aNode === this.inspector.selection.nodeFront) {
+      this.inspector.change("markupview");
     }
   },
 
@@ -622,7 +627,7 @@ MarkupView.prototype = {
    */
   _checkSelectionVisible: function(aContainer) {
     let centered = null;
-    let node = this._inspector.selection.nodeFront;
+    let node = this.inspector.selection.nodeFront;
     while (node) {
       if (node.parentNode() === aContainer.node) {
         centered = node;
@@ -806,7 +811,7 @@ MarkupView.prototype = {
       this._boundKeyDown, false);
     delete this._boundKeyDown;
 
-    this._inspector.selection.off("new-node-front", this._boundOnNewSelection);
+    this.inspector.selection.off("new-node-front", this._boundOnNewSelection);
     delete this._boundOnNewSelection;
 
     this.walker.off("mutations", this._boundMutationObserver)
@@ -947,7 +952,7 @@ function MarkupContainer(aMarkupView, aNode) {
 
   // Dealing with the highlighting of the row via javascript rather than :hover
   // This is to allow highlighting the closing tag-line as well as reusing the
-  // theme css classes (which wouldn't have been possible with a :hover pseudo)
+  // theme css classes
   this._onMouseOver = this._onMouseOver.bind(this);
   this.elt.addEventListener("mouseover", this._onMouseOver, false);
 
@@ -959,11 +964,44 @@ function MarkupContainer(aMarkupView, aNode) {
 
   this._onMouseDown = this._onMouseDown.bind(this);
   this.elt.addEventListener("mousedown", this._onMouseDown, false);
+
+  this.tooltip = null;
+  this._attachTooltipIfNeeded();
 }
 
 MarkupContainer.prototype = {
   toString: function() {
     return "[MarkupContainer for " + this.node + "]";
+  },
+
+  _attachTooltipIfNeeded: function () {
+    let tagName = this.node.tagName && this.node.tagName.toLowerCase();
+    let isImage = tagName && tagName === "img";
+    let isCanvas = tagName && tagName === "canvas";
+
+    // Get the image data for later so that when the user actually hovers over
+    // the element, the tooltip does contain the image
+    if (isImage || isCanvas) {
+      this.tooltip = new Tooltip(this.markup.inspector.panelDoc);
+
+      this.node.getImageData().then(data => {
+        if (data) {
+          data.string().then(str => {
+            this.tooltip.contentFactory.image(str);
+          });
+        }
+      });
+    }
+
+    // If it's an image, show the tooltip on the src attribute
+    if (isImage) {
+      this.tooltip.toggleOnHover(this.editor.getAttributeElement("src"));
+    }
+
+    // If it's a canvas, show it on the tag
+    if (isCanvas) {
+      this.tooltip.toggleOnHover(this.editor.tag);
+    }
   },
 
   /**
@@ -1200,6 +1238,12 @@ MarkupContainer.prototype = {
 
     // Destroy my editor
     this.editor.destroy();
+
+    // Destroy the tooltip if any
+    if (this.tooltip) {
+      this.tooltip.destroy();
+      this.tooltip = null;
+    }
   }
 };
 
@@ -1213,7 +1257,7 @@ function RootContainer(aMarkupView, aNode) {
   this.elt.container = this;
   this.children = this.elt;
   this.node = aNode;
-  this.toString = function() { return "[root container]"}
+  this.toString = () => "[root container]";
 }
 
 RootContainer.prototype = {
@@ -1441,6 +1485,17 @@ ElementEditor.prototype = {
 
   _startModifyingAttributes: function() {
     return this.node.startModifyingAttributes();
+  },
+
+  /**
+   * Get the element used for one of the attributes of this element
+   * @param string attrName The name of the attribute to get the element for
+   * @return DOMElement
+   */
+  getAttributeElement: function EE_getAttributeElement(attrName)
+  {
+    return this.attrList.querySelector(
+      ".attreditor[data-attr=" + attrName + "] .attr-value");
   },
 
   _createAttribute: function(aAttr, aBefore = null) {

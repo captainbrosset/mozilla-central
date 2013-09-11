@@ -178,7 +178,8 @@ Toolbox.prototype = {
   },
 
   /**
-   * Open the toolbox
+   * Open the toolbox.
+   * Typically the first method to call after a new toolbox is instantiated.
    */
   open: function() {
     let deferred = promise.defer();
