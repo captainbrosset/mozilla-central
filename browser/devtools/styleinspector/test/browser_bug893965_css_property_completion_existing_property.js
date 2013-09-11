@@ -76,7 +76,7 @@ function testCompletion()
     checkStateAndMoveOn(0);
   });
 
-  brace.click();
+  EventUtils.synthesizeMouse(brace, 1, 1, {}, ruleViewWindow);
 }
 
 function checkStateAndMoveOn(index) {
@@ -103,6 +103,7 @@ function checkStateAndMoveOn(index) {
   else {
     editor.once("after-suggest", checkState);
   }
+
   EventUtils.synthesizeKey(key, {}, ruleViewWindow);
 }
 
