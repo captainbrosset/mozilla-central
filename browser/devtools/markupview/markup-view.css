@@ -33,9 +33,6 @@
   position: relative;
 }
 
-/* Children are indented thanks to their parent's left padding, that means they
- * are not stretching from edge to edge, which is what we want.
- * So we insert an element and make sure it covers the whole "line" */
 .tag-line .highlighter {
   position: absolute;
   left: -1000em;
@@ -84,6 +81,10 @@
 
 .newattr:focus {
   margin-right: 0;
+}
+
+.highlighter.flash-out {
+  transition: background 1s;
 }
 
 /* Preview */

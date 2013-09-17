@@ -51,6 +51,10 @@
   background: #EFEFEF;
 }
 
+.theme-bg-contrast {
+  background: #a18650;
+}
+
 .theme-link { /* blue */
   color: hsl(208,56%,40%);
 }

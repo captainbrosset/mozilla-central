@@ -13,6 +13,7 @@ const DEFAULT_MAX_CHILDREN = 100;
 const COLLAPSE_ATTRIBUTE_LENGTH = 120;
 const COLLAPSE_DATA_URL_REGEX = /^data.+base64/;
 const COLLAPSE_DATA_URL_LENGTH = 60;
+const CONTAINER_FLASHING_DURATION = 500;
 
 const {UndoStack} = require("devtools/shared/undo");
 const {editableField, InplaceEditor} = require("devtools/shared/inplace-editor");
@@ -357,9 +358,11 @@ MarkupView.prototype = {
    *
    * @param DOMNode aNode
    *        The node in the content document.
+   * @param boolean aFlashNode
+   *        Whether the newly imported node should be flashed
    * @returns MarkupContainer The MarkupContainer object for this element.
    */
-  importNode: function MT_importNode(aNode)
+  importNode: function MT_importNode(aNode, aFlashNode)
   {
     if (!aNode) {
       return null;
@@ -375,6 +378,9 @@ MarkupView.prototype = {
       this._rootNode = aNode;
     } else {
       var container = new MarkupContainer(this, aNode);
+      if (aFlashNode) {
+        container.flashMutation();
+      }
     }
 
     this._containers.set(aNode, container);
@@ -415,12 +421,60 @@ MarkupView.prototype = {
         container.update(false);
       } else if (type === "childList") {
         container.childrenDirty = true;
-        this._updateChildren(container);
+        // Update the children to take care of changes in the DOM
+        // Passing true as the last parameter asks for mutation flashing of the 
+        // new nodes
+        this._updateChildren(container, false, true);
       }
     }
     this._waitForChildren().then(() => {
       this._inspector.emit("markupmutation");
+      this._flashMutatedNodes(aMutations);
     });
+  },
+
+  /**
+   * Given a list of mutations returned by the mutation observer, flash the 
+   * corresponding containers to attract attention.
+   */
+  _flashMutatedNodes: function MT_flashMutatedNodes(aMutations)
+  {
+    let addedOrEditedContainers = new Set();
+    let removedContainers = new Set();
+
+    for (let {type, target, added, removed} of aMutations) {
+      let container = this._containers.get(target);
+
+      if (container) {
+        if (type === "attributes" || type === "characterData") {
+          addedOrEditedContainers.add(container);
+        } else if (type === "childList") {
+          // If there has been removals, flash the parent
+          if (removed.length) {
+            removedContainers.add(container);
+          }
+
+          // If there has been additions, flash the nodes
+          added.forEach(added => {
+            let addedContainer = this._containers.get(added);
+            addedOrEditedContainers.add(addedContainer);
+
+            // The node may be added as a result of an append, in which case it
+            // it will have been removed from another container first, but in
+            // these cases we don't want to flash both the removal and the
+            // addition
+            removedContainers.delete(container);
+          });
+        }
+      }
+    }
+
+    for (let container of removedContainers) {
+      container.flashMutation();
+    }
+    for (let container of addedOrEditedContainers) {
+      container.flashMutation();
+    }
   },
 
   /**
@@ -609,7 +663,7 @@ MarkupView.prototype = {
    * This method returns a promise that will be resolved when the children
    * are ready (which may be immediately).
    */
-  _updateChildren: function(aContainer, aExpand)
+  _updateChildren: function(aContainer, aExpand, aIsMutation)
   {
     aContainer.hasChildren = aContainer.node.hasChildren;
 
@@ -663,7 +717,7 @@ MarkupView.prototype = {
       let fragment = this.doc.createDocumentFragment();
 
       for (let child of children.nodes) {
-        let container = this.importNode(child);
+        let container = this.importNode(child, aIsMutation);
         fragment.appendChild(container.elt);
       }
 
@@ -999,6 +1053,26 @@ MarkupContainer.prototype = {
     event.stopPropagation();
   },
 
+  /**
+   * Temporarily flash the container to attract attention.
+   * Used for markup mutations.
+   */
+  flashMutation: function() {
+    if (!this.selected) {
+      let contentWin = this.markup._frame.contentWindow;
+      this.highlighter.classList.remove("flash-out");
+      this.highlighter.classList.add("theme-bg-contrast");
+      if (this._flashMutationTimer) {
+        contentWin.clearTimeout(this._flashMutationTimer);
+        this._flashMutationTimer = null;
+      }
+      this._flashMutationTimer = this.markup._frame.contentWindow.setTimeout(() => {
+        this.highlighter.classList.remove("theme-bg-contrast");
+        this.highlighter.classList.add("flash-out");
+      }, CONTAINER_FLASHING_DURATION);
+    }
+  },
+
   _highlighted: false,
 
   /**
@@ -1006,6 +1080,7 @@ MarkupContainer.prototype = {
    * (that is if the tag is expanded)
    */
   set highlighted(aValue) {
+    this.highlighter.classList.remove("flash-out");
     this._highlighted = aValue;
     if (aValue) {
       if (!this.selected) {
@@ -1039,6 +1114,7 @@ MarkupContainer.prototype = {
   },
 
   set selected(aValue) {
+    this.highlighter.classList.remove("flash-out");
     this._selected = aValue;
     this.editor.selected = aValue;
     if (this._selected) {
@@ -1361,7 +1437,7 @@ ElementEditor.prototype = {
         }
       },
       done: (aVal, aCommit) => {
-        if (!aCommit) {
+        if (!aCommit || aVal === initial) {
           return;
         }
 
