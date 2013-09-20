@@ -724,25 +724,27 @@ var ProgressListener = Class({
     this.webProgress = null;
   },
 
-  onStateChange: makeInfallible(function stateChange(progress, request, flag, status) {
+  onStateChange: makeInfallible(function stateChange(progress, request, flags, status) {
     if (!this.webProgress) {
       console.warn("got an onStateChange after destruction");
       return;
     }
 
-    let isWindow = flag & Ci.nsIWebProgressListener.STATE_IS_WINDOW;
-    let isDocument = flag & Ci.nsIWebProgressListener.STATE_IS_DOCUMENT;
+    let isWindow = flags & Ci.nsIWebProgressListener.STATE_IS_WINDOW;
+    let isDocument = flags & Ci.nsIWebProgressListener.STATE_IS_DOCUMENT;
+    let isNetwork = flags & Ci.nsIWebProgressListener.STATE_IS_NETWORK;
     if (!(isWindow || isDocument)) {
       return;
     }
 
-    if (isDocument && (flag & Ci.nsIWebProgressListener.STATE_START)) {
+    if (isDocument && (flags & Ci.nsIWebProgressListener.STATE_START)) {
       events.emit(this, "windowchange-start", progress.DOMWindow);
     }
-    if (isWindow && (flag & Ci.nsIWebProgressListener.STATE_STOP)) {
+    if (isNetwork && (flags & Ci.nsIWebProgressListener.STATE_STOP)) {
       events.emit(this, "windowchange-stop", progress.DOMWindow);
     }
   }),
+
   onProgressChange: function() {},
   onSecurityChange: function() {},
   onStatusChange: function() {},

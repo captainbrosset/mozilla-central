@@ -168,7 +168,7 @@ InspectorPanel.prototype = {
     // as default selected, else set documentElement
     return walker.getRootNode().then(aRootNode => {
       rootNode = aRootNode;
-      return walker.querySelector(aRootNode, this.selectionCssSelector);
+      return walker.querySelector(rootNode, this.selectionCssSelector);
     }).then(front => {
       if (front) {
         return front;
@@ -345,28 +345,31 @@ InspectorPanel.prototype = {
    * When a new node is selected.
    */
   onNewSelection: function InspectorPanel_onNewSelection(event, value, reason) {
-    this.cancelLayoutChange();
+    // We want to skip cases where the selection was set to null
+    if (value) {
+      this.cancelLayoutChange();
 
-    // Wait for all the known tools to finish updating and then let the
-    // client know.
-    let selection = this.selection.nodeFront;
+      // Wait for all the known tools to finish updating and then let the
+      // client know.
+      let selection = this.selection.nodeFront;
 
-    // On any new selection made by the user, store the unique css selector
-    // of the selected node so it can be restored after reload of the same page
-    if (reason !== "navigateaway" &&
-        this.selection.node &&
-        this.selection.isElementNode()) {
-      this.selectionCssSelector = CssLogic.findCssSelector(this.selection.node);
-    }
-
-    let selfUpdate = this.updating("inspector-panel");
-    Services.tm.mainThread.dispatch(() => {
-      try {
-        selfUpdate(selection);
-      } catch(ex) {
-        console.error(ex);
+      // On any new selection made by the user, store the unique css selector
+      // of the selected node so it can be restored after reload of the same page
+      if (reason !== "navigateaway" &&
+          this.selection.node &&
+          this.selection.isElementNode()) {
+        this.selectionCssSelector = CssLogic.findCssSelector(this.selection.node);
       }
-    }, Ci.nsIThread.DISPATCH_NORMAL);
+
+      let selfUpdate = this.updating("inspector-panel");
+      Services.tm.mainThread.dispatch(() => {
+        try {
+          selfUpdate(selection);
+        } catch(ex) {
+          console.error(ex);
+        }
+      }, Ci.nsIThread.DISPATCH_NORMAL);
+    }
   },
 
   /**

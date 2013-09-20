@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>iframe creation/deletion test</title>
+</head>
+<body>
+  <div id="yay"></div>
+  <script>
+    var iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    iframe.parentNode.removeChild(iframe);
+  </script>
+</body>
+</html>

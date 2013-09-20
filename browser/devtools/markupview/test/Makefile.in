@@ -15,5 +15,7 @@ MOCHITEST_BROWSER_FILES := \
     browser_inspector_markup_subset.html \
     browser_inspector_markup_subset.js \
     browser_bug896181_css_mixed_completion_new_attribute.js \
+    browser_bug917448_inspector_dead_node_exception.js \
+    browser_bug917448_inspector_dead_node_exception.html \
 		head.js \
 		$(NULL)

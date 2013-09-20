@@ -372,22 +372,24 @@ LayoutHelpers.prototype = {
       return null;
     }
 
+    // Get the docShell for that window, and its same-type parent
+    // ignoring mozBrowser and mozApp boundaries
     let docShell = win.QueryInterface(Ci.nsIInterfaceRequestor)
                    .getInterface(Ci.nsIWebNavigation)
                    .QueryInterface(Ci.nsIDocShell);
+    let parentDocShell = docShell.getSameTypeParentIgnoreBrowserAndAppBoundaries();
 
-    if (docShell.isBrowserOrApp) {
-      let parentDocShell = docShell.getSameTypeParentIgnoreBrowserAndAppBoundaries();
-      let parentDoc = parentDocShell.contentViewer.DOMDocument;
-      let allIframes = parentDoc.querySelectorAll("iframe");
-      for (let f of allIframes) {
-        if (f.contentWindow === win) {
-          return f;
-        }
+    // Once we have a parent, get all its iframes and loop through them
+    // to find `win`. If we do, it means win is a nested iframe
+    let parentDoc = parentDocShell.contentViewer.DOMDocument;
+    let allIframes = parentDoc.querySelectorAll("iframe");
+    for (let f of allIframes) {
+      if (f.contentWindow === win) {
+        return f;
       }
-      return null;
-    } else {
-      return win.frameElement;
     }
+
+    // Otherwise, win is a top level window
+    return null;
   },
 };
