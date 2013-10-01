@@ -26,6 +26,26 @@ const LAYOUT_CHANGE_TIMER = 250;
  * The inspector controls the highlighter, the breadcrumbs,
  * the markup view, and the sidebar (computed view, rule view
  * and layout view).
+ *
+ * Emits the following events:
+ *
+ * - inspector-updated : when one of the inspector's tools is updated, after a
+ *   new node was selected. Along with the event, a string will be passed to
+ *   identify which tool has been updated.
+ * - rule-view-refreshed : when the rule-view content changes after a new node
+ *   was selected
+ * - rule-view-changed : when the rule-view content changes after a rule was
+ *   changed by the user
+ * - breadcrumbs-updated : when the breadcrumbs view was updated
+ * - layoutview-updated : when the layout view was updated
+ * - markupmutation : after markup mutations have been observed and updated in
+ *   the markup view
+ * - computed-view-refreshed : when the computed-view content gets refreshed
+ *   after a new node was selected
+ * - computed-view-property-expanded : when a property gets expanded in the
+ *   computed view
+ * - computed-view-property-collapsed : when a property gets collapsed in the
+ *   computed view
  */
 function InspectorPanel(iframeWindow, toolbox) {
   this._toolbox = toolbox;
@@ -399,7 +419,7 @@ InspectorPanel.prototype = {
           }
 
           self._updateProgress = null;
-          self.emit("inspector-updated");
+          self.emit("inspector-updated", name);
         },
       };
     }

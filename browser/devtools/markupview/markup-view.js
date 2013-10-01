@@ -94,6 +94,16 @@ function MarkupView(aInspector, aFrame, aControllerWindow)
   gDevTools.on("pref-changed", this._handlePrefChange);
 
   this._initPreview();
+
+  // TODO : this kind of works but we have 2 problems:
+  // - while a new property is typed in the rule-view, all sorts of errors are triggered through here
+  //   this.getContainer(...) is undefined: MarkupView.prototype.update/updateChildren<@resource://gre/modules/commonjs/toolkit/loader.js -> resource:///modules/devtools/markupview/markup-view.js:133
+  // - this won't work when new styles are created via javascript, for this we'll need bug 922146
+  // Also, perhaps we should listen to style changes at container level only, not at this global level
+  // To be continued ...
+  this._inspector.on("rule-view-changed", () => {
+    this.update();
+  });
 }
 
 exports.MarkupView = MarkupView;
@@ -1393,9 +1403,8 @@ ElementEditor.prototype = {
       return;
     }
 
-    // Hide all the attribute editors, they'll be re-shown if they're
-    // still applicable.  Don't update attributes that are being
-    // actively edited.
+    // Hide all the attribute editors, they'll be re-shown if they're still
+    // applicable. Don't update attributes that are being actively edited.
     let attrEditors = this.attrList.querySelectorAll(".attreditor");
     for (let i = 0; i < attrEditors.length; i++) {
       if (!attrEditors[i].inplaceEditor) {
@@ -1414,6 +1423,20 @@ ElementEditor.prototype = {
         attribute.style.removeProperty("display");
       }
     }
+
+    this._fadeIfNotDisplayed();
+  },
+
+  _fadeIfNotDisplayed: function EE_fadeIfNotDisplayed()
+  {
+    // Fade the element's colors if the node has its CSS display set to `none`
+    this.markup._inspector.pageStyle.getComputed(this.node).then(styles => {
+      if (styles.display.value === "none") {
+        this.elt.classList.add("hidden-tag");
+      } else {
+        this.elt.classList.remove("hidden-tag");
+      }
+    });
   },
 
   _startModifyingAttributes: function() {
@@ -1496,7 +1519,6 @@ ElementEditor.prototype = {
         }
       }
     });
-
 
     // Figure out where we should place the attribute.
     let before = aBefore;

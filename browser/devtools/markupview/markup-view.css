@@ -93,6 +93,10 @@
   transition: background .5s;
 }
 
+.hidden-tag {
+  opacity: .6;
+}
+
 /* Preview */
 
 #previewbar {

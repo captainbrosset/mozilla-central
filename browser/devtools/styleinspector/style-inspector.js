@@ -29,6 +29,7 @@ function RuleViewTool(aInspector, aWindow, aIFrame)
   this.doc.documentElement.appendChild(this.view.element);
 
   this._changeHandler = () => {
+    this.inspector.emit("rule-view-changed");
     this.inspector.markDirty();
   };
 
