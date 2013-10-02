@@ -181,8 +181,6 @@ function ComputedViewTool(aInspector, aWindow, aIFrame)
   this.refresh = this.refresh.bind(this);
   this.inspector.on("layout-change", this.refresh);
   this.inspector.selection.on("pseudoclass", this.refresh);
-  this.panelSelected = this.panelSelected.bind(this);
-  this.inspector.sidebar.on("computedview-selected", this.panelSelected);
 
   this.view.highlight(null);
 
@@ -194,11 +192,6 @@ exports.ComputedViewTool = ComputedViewTool;
 ComputedViewTool.prototype = {
   onSelect: function CVT_onSelect(aEvent)
   {
-    if (!this.isActive()) {
-      // We'll try again when we're selected.
-      return;
-    }
-
     this.view.setPageStyle(this.inspector.pageStyle);
 
     if (!this.inspector.selection.isConnected() ||
@@ -236,16 +229,10 @@ ComputedViewTool.prototype = {
     }
   },
 
-  panelSelected: function() {
-    if (this.inspector.selection.nodeFront === this.view.viewedElement) {
-      this.view.refreshPanel();
-    } else {
-      this.onSelect();
-    }
-  },
-
   destroy: function CVT_destroy(aContext)
   {
+    console.log("COMPUTEDVIEWTOOL BEING DESTROYED NOW!!!");
+
     this.inspector.off("layout-change", this.refresh);
     this.inspector.sidebar.off("computedview-selected", this.refresh);
     this.inspector.selection.off("pseudoclass", this.refresh);
