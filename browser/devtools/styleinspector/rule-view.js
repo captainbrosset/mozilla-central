@@ -1871,13 +1871,43 @@ TextPropertyEditor.prototype = {
     let propertyContainer = createChild(this.element, "span", {
       class: "ruleview-propertycontainer"
     });
-    propertyContainer.addEventListener("click", (aEvent) => {
+    propertyContainer.addEventListener("click", aEvent => {
       // Clicks within the value shouldn't propagate any further.
       aEvent.stopPropagation();
       if (aEvent.target === propertyContainer) {
         this.valueSpan.click();
       }
     }, false);
+
+    // ////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////
+    // FIXME: Mike working on swatches, so remove this, this is for test only
+    // FIXME: would be good to only use 1 instance of color picker across the rule-view
+    // and share it. So export this into a separate class/singleton
+    let color = new colorUtils.CssColor(this.prop.value);
+    if (color.valid) {
+      let swatch = createChild(propertyContainer, "span", {
+        style: "display:inline-block;cursor:pointer;background:" + this.prop.value + ";width:10px;height:10px;border-radius:50%;"
+      });
+
+      let tooltip = new Tooltip(this.ruleEditor.ruleView.inspector.panelDoc);
+
+      let rgba = color._getRGBATuple();
+      tooltip.contentFactory.spectrum([rgba.r, rgba.g, rgba.b, rgba.a]).then(
+        spectrum => {
+          spectrum.addChangeListener(color => {
+            // FIXME: this function is meant for the edit in place, rename/refactor
+            this._onValueDone("rgba(" + color[0] + "," + color[1] + "," + color[2] + "," + color[3] + ")", true);
+          });
+        }
+      );
+
+      swatch.addEventListener("click", () => {
+        tooltip.show(swatch, "topcenter bottomleft");
+      }, false);
+    }
+    // ////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////
 
     // Property value, editable when focused.  Changes to the
     // property value are applied as they are typed, and reverted

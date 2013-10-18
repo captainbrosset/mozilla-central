@@ -1,0 +1,109 @@
+/***
+Spectrum: The No Hassle Colorpicker
+https://github.com/bgrins/spectrum
+
+Author: Brian Grinstead
+License: MIT
+***/
+
+.spectrum-container {
+  position: relative;
+  display: none;
+  top: 0;
+  left: 0;
+  border-radius: 0;
+  width: 200px;
+  padding: 5px;
+}
+
+.spectrum-show {
+  display: inline-block;
+}
+
+/* Keep aspect ratio:
+http://www.briangrinstead.com/blog/keep-aspect-ratio-with-html-and-css */
+.spectrum-top {
+  position: relative;
+  width: 100%;
+  display: inline-block;
+}
+
+.spectrum-top-inner {
+  position: absolute;
+  top:0;
+  left:0;
+  bottom:0;
+  right:0;
+}
+
+.spectrum-color {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 20%;
+}
+
+.spectrum-hue {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 83%;
+}
+
+.spectrum-fill {
+  /* Same as spectrum-color width */
+  margin-top: 80%;
+}
+
+.spectrum-sat, .spectrum-val {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+.spectrum-dragger, .spectrum-slider {
+  user-select: none;
+}
+
+.spectrum-range-container input {
+  width: 80%;
+}
+
+.spectrum-sat {
+  background-image: -moz-linear-gradient(left, #FFF, rgba(204, 154, 129, 0));
+}
+
+.spectrum-val {
+  background-image: -moz-linear-gradient(bottom, #000000, rgba(204, 154, 129, 0));
+}
+
+.spectrum-hue {
+  background: -moz-linear-gradient(top, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%);
+}
+
+.spectrum-dragger {
+  border-radius: 5px;
+  height: 5px;
+  width: 5px;
+  border: solid black 3px;
+  cursor: pointer;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.spectrum-slider {
+  position: absolute;
+  top: 0;
+  cursor: pointer;
+  height: 5px;
+  margin-left: -1px;
+  width: calc(100% + 2px);
+  border: 1px solid black;
+  background: white;
+  opacity: .8;
+}

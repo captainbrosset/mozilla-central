@@ -976,7 +976,8 @@ MarkupContainer.prototype = {
 
   _attachTooltipIfNeeded: function () {
     let tagName = this.node.tagName && this.node.tagName.toLowerCase();
-    let isImage = tagName && tagName === "img";
+    let isImage = tagName && tagName === "img" &&
+      this.editor.getAttributeElement("src");
     let isCanvas = tagName && tagName === "canvas";
 
     // Get the image data for later so that when the user actually hovers over

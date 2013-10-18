@@ -8,6 +8,7 @@ const {Cc, Cu, Ci} = require("chrome");
 const promise = require("sdk/core/promise");
 const IOService = Cc["@mozilla.org/network/io-service;1"]
   .getService(Ci.nsIIOService);
+const {Spectrum} = require("devtools/shared/widgets/Spectrum");
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource:///modules/devtools/ViewHelpers.jsm");
@@ -16,6 +17,7 @@ const GRADIENT_RE = /\b(repeating-)?(linear|radial)-gradient\(((rgb|hsl)a?\(.+?\
 const BORDERCOLOR_RE = /^border-[-a-z]*color$/ig;
 const BORDER_RE = /^border(-(top|bottom|left|right))?$/ig;
 const BACKGROUND_IMAGE_RE = /url\([\'\"]?(.*?)[\'\"]?\)/;
+const XHTML_NS = "http://www.w3.org/1999/xhtml";
 
 /**
  * Tooltip widgets.
@@ -49,6 +51,17 @@ let PanelFactory = {
   els: new Map(),
 
   get: function(doc, xulTag="panel") {
+    // FIXME: just investigating something
+    return this._create(doc, xulTag);
+    // The problem is: if several really different kinds of tooltip share the same xul panel, there may be problems.
+    // Especially if one wants to toggleOnHover and the other not, because that means everytime you move over the baseNode
+    // the tooltip will hide even though you may not want it.
+    // Also, some tooltip will contain heavy stuff that don't need to change, so emptying and re-creating the content everytime may not be wanted
+    // Perhaps one way would be to have 2 modes when creating a tooltip: weakTooltip, shared, short-lived content, and RealTooltips, your own, never shared, content stays
+    // Or maybe we don't care and we just create a panel everytime
+    // --> YES, let's go for this
+
+    // Code here
     if (this.els.has(doc)) {
       return this.els.get(doc);
     } else {
@@ -118,7 +131,7 @@ Tooltip.prototype = {
   /**
    * Show the tooltip. It might be wise to append some content first if you
    * don't want the tooltip to be empty. You may access the content of the
-   * tooltip by setting a XUL node to t.tooltip.content.
+   * tooltip by setting a XUL node to t.content.
    * @param node anchor
    *        Which node should the tooltip be shown on
    * @param string position
@@ -126,9 +139,12 @@ Tooltip.prototype = {
    *        Defaults to before_start
    */
   show: function(anchor, position="before_start") {
-    if (this._storedContent) {
-      this.content = this._storedContent;
-    }
+    // FIXME: deal with this. The best would probably be to create one panel
+    // per instance, and never change the content.
+
+    // if (this._storedContent) {
+    //   this.content = this._storedContent;
+    // }
     this.tooltip.hidden = false;
     this.tooltip.openPopup(anchor, position);
   },
@@ -139,6 +155,14 @@ Tooltip.prototype = {
   hide: function() {
     this.tooltip.hidden = true;
     this.tooltip.hidePopup();
+  },
+
+  toggle: function(anchor, position="before_start") {
+    if (this.tooltip.hidden) {
+      this.show(anchor, position);
+    } else {
+      this.hide();
+    }
   },
 
   /**
@@ -386,6 +410,49 @@ TooltipContentFactory.prototype = {
       {name: "background", value: "white"},
       {name: "border", value: cssBorder}
     ], 80, 80);
+  },
+
+  /**
+   * Fill the tooltip with a new instance of the spectrum color picker widget
+   * initialized with the given color, and return a promise that resolves to
+   * the instance of spectrum
+   */
+  spectrum: function(color) {
+    let def = promise.defer();
+
+    // Create an iframe to contain spectrum
+    let iframe = this.doc.createElementNS(XHTML_NS, "iframe");
+    iframe.setAttribute("transparent", true);
+    iframe.setAttribute("width", "210");
+    iframe.setAttribute("height", "195");
+    iframe.setAttribute("flex", "1");
+    iframe.setAttribute("class", "devtools-tooltip-iframe");
+
+    let panel = this.tooltip.tooltip;
+    let xulWin = this.doc.ownerGlobal;
+
+    // Wait for the load to initialize spectrum
+    function onLoad() {
+      iframe.removeEventListener("load", onLoad, true);
+      let win = iframe.contentWindow.wrappedJSObject;
+
+      let container = win.document.getElementById("spectrum");
+      let spectrum = new Spectrum(container, color);
+
+      // Finalize spectrum's init when the tooltip becomes visible
+      panel.addEventListener("popupshown", function shown() {
+        panel.removeEventListener("popupshown", shown, true);
+        spectrum.show();
+        def.resolve(spectrum);
+      }, true);
+    }
+    iframe.addEventListener("load", onLoad, true);
+    iframe.setAttribute("src", "chrome://browser/content/devtools/spectrum-frame.xhtml");
+
+    // Put the iframe in the tooltip
+    this.tooltip.content = iframe;
+
+    return def.promise;
   }
 };
 
