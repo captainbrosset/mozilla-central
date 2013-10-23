@@ -20,6 +20,7 @@ const BORDERCOLOR_RE = /^border-[-a-z]*color$/ig;
 const BORDER_RE = /^border(-(top|bottom|left|right))?$/ig;
 const BACKGROUND_IMAGE_RE = /url\([\'\"]?(.*?)[\'\"]?\)/;
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
+const SPECTRUM_FRAME = "chrome://browser/content/devtools/spectrum-frame.xhtml";
 
 /**
  * Tooltip widget.
@@ -372,6 +373,17 @@ Tooltip.prototype = {
   },
 
   /**
+   * Exactly the same as the `image` function but takes a css background image
+   * value instead : url(....)
+   */
+  setCssBackgroundImageContent: function(cssBackground, sheetHref, maxDim=400) {
+    let uri = getBackgroundImageUri(cssBackground, sheetHref);
+    if (uri) {
+      this.setImageContent(uri, maxDim);
+    }
+  },
+
+  /**
    * Fill the tooltip with a new instance of the spectrum color picker widget
    * initialized with the given color, and return a promise that resolves to
    * the instance of spectrum
@@ -406,23 +418,12 @@ Tooltip.prototype = {
       }, true);
     }
     iframe.addEventListener("load", onLoad, true);
-    iframe.setAttribute("src", "chrome://browser/content/devtools/spectrum-frame.xhtml");
+    iframe.setAttribute("src", SPECTRUM_FRAME);
 
     // Put the iframe in the tooltip
     this.content = iframe;
 
     return def.promise;
-  },
-
-  /**
-   * Exactly the same as the `image` function but takes a css background image
-   * value instead : url(....)
-   */
-  setCssBackgroundImageContent: function(cssBackground, sheetHref, maxDim=400) {
-    let uri = getBackgroundImageUri(cssBackground, sheetHref);
-    if (uri) {
-      this.setImageContent(uri, maxDim);
-    }
   },
 
   setCssGradientContent: function(cssGradient) {
