@@ -9,12 +9,11 @@
 const {Cc, Ci, Cu} = require("chrome");
 const promise = require("sdk/core/promise");
 
-let {CssLogic} = require("devtools/styleinspector/css-logic");
-let {InplaceEditor, editableField, editableItem} = require("devtools/shared/inplace-editor");
-let {ELEMENT_STYLE, PSEUDO_ELEMENTS} = require("devtools/server/actors/styles");
-let {gDevTools} = Cu.import("resource:///modules/devtools/gDevTools.jsm", {});
-let {Tooltip} = require("devtools/shared/widgets/Tooltip");
-
+const {CssLogic} = require("devtools/styleinspector/css-logic");
+const {InplaceEditor, editableField, editableItem} = require("devtools/shared/inplace-editor");
+const {ELEMENT_STYLE, PSEUDO_ELEMENTS} = require("devtools/server/actors/styles");
+const {gDevTools} = Cu.import("resource:///modules/devtools/gDevTools.jsm", {});
+const {Tooltip, SwatchColorPickerTooltip} = require("devtools/shared/widgets/Tooltip");
 const {OutputParser} = require("devtools/output-parser");
 
 Cu.import("resource://gre/modules/Services.jsm");
@@ -1070,8 +1069,14 @@ function CssRuleView(aInspector, aDoc, aStore, aPageStyle)
   };
   this.popup = new AutocompletePopup(aDoc.defaultView.parent.document, options);
 
-  this.tooltip = new Tooltip(this.inspector.panelDoc);
-  this.tooltip.startTogglingOnHover(this.element, this._buildTooltipContent.bind(this));
+  // Create a tooltip for previewing things in the rule view (images for now)
+  this.previewTooltip = new Tooltip(this.inspector.panelDoc);
+  this.previewTooltip.startTogglingOnHover(this.element,
+    this._buildTooltipContent.bind(this));
+
+  // Also create a more complex tooltip for editing colors with the spectrum
+  // color picker
+  this.colorPicker = new SwatchColorPickerTooltip(this.inspector.panelDoc);
 
   this._buildContextMenu();
   this._showEmpty();
@@ -1140,7 +1145,11 @@ CssRuleView.prototype = {
     let href = property.rule.domRule.href;
 
     // Fill some content
-    this.tooltip.setCssBackgroundImageContent(property.value, href);
+    this.previewTooltip.setCssBackgroundImageContent(property.value, href);
+
+    // Hide the color picker tooltip if shown
+    this.colorPicker.hide();
+
     return true;
   },
 
@@ -1277,8 +1286,8 @@ CssRuleView.prototype = {
     // We manage the popupNode ourselves so we also need to destroy it.
     this.doc.popupNode = null;
 
-    this.tooltip.stopTogglingOnHover(this.element);
-    this.tooltip.destroy();
+    this.previewTooltip.stopTogglingOnHover(this.element);
+    this.previewTooltip.destroy();
 
     if (this.element.parentNode) {
       this.element.parentNode.removeChild(this.element);
@@ -1816,7 +1825,8 @@ TextPropertyEditor.prototype = {
    * Boolean indicating if the name or value is being currently edited.
    */
   get editing() {
-    return !!(this.nameSpan.inplaceEditor || this.valueSpan.inplaceEditor);
+    return !!(this.nameSpan.inplaceEditor || this.valueSpan.inplaceEditor ||
+      this._isEditingColor);
   },
 
   /**
@@ -2024,17 +2034,58 @@ TextPropertyEditor.prototype = {
 
       appendText(this.valueSpan, val.split(resourceURI)[1]);
     } else {
+      let swatchClass = "ruleview-colorswatch";
+
       let outputParser = this.ruleEditor.ruleView._outputParser;
       let frag = outputParser.parseCssProperty(name, val, {
-        colorSwatchClass: "ruleview-colorswatch",
+        colorSwatchClass: swatchClass,
         defaultColorType: !propDirty
       });
       this.valueSpan.innerHTML = "";
       this.valueSpan.appendChild(frag);
+
+      // Attach the color picker tooltip to the color swatches
+      this._onColorSwatchClick = this._onColorSwatchClick.bind(this);
+      this._swatchSpans = this.valueSpan.querySelectorAll("." + swatchClass);
+      if (this._swatchSpans.length) {
+        [].forEach.call(this._swatchSpans, span => {
+          span.addEventListener("click", this._onColorSwatchClick, false);
+        });
+      }
     }
 
     // Populate the computed styles.
     this._updateComputed();
+  },
+
+  _onColorSwatchClick: function TextPropertyEditor_onColorSwatchClick(event)
+  {
+    let swatch = event.target;
+    let colorPicker = this.ruleEditor.ruleView.colorPicker;
+    let beforeEditValue = this.valueSpan.textContent;
+
+    let preview = () => this._livePreview(this.valueSpan.textContent);
+    let commit = () => this._onValueDone(this.valueSpan.textContent, true);
+    let revert = () => this._onValueDone(beforeEditValue, true);
+
+    colorPicker.on("changed", preview);
+    colorPicker.on("revert", revert);
+    colorPicker.on("commit", commit);
+
+    this._isEditingColor = true;
+    colorPicker.once("hidden", () => {
+      this._isEditingColor = false;
+      colorPicker.off("changed", preview);
+      colorPicker.off("revert", revert);
+      colorPicker.off("commit", commit);
+    });
+
+    colorPicker.show({
+      colorSwatch: swatch,
+      color: swatch.style.backgroundColor
+    });
+
+    event.stopPropagation();
   },
 
   _onStartEditing: function TextPropertyEditor_onStartEditing()
@@ -2173,6 +2224,11 @@ TextPropertyEditor.prototype = {
    */
   remove: function TextPropertyEditor_remove()
   {
+    if (this._swatchSpans && this._swatchSpans.length) {
+      [].forEach.call(this._swatchSpans, span => {
+        span.removeEventListener("click", this._onColorSwatchClick, false);
+      });
+    }
     this.element.parentNode.removeChild(this.element);
     this.ruleEditor.rule.editClosestTextProperty(this.prop);
     this.valueSpan.textProperty = null;

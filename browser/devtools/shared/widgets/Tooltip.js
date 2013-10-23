@@ -8,6 +8,9 @@ const {Cc, Cu, Ci} = require("chrome");
 const promise = require("sdk/core/promise");
 const IOService = Cc["@mozilla.org/network/io-service;1"]
   .getService(Ci.nsIIOService);
+const {Spectrum} = require("devtools/shared/widgets/Spectrum");
+const EventEmitter = require("devtools/shared/event-emitter");
+const {colorUtils} = require("devtools/css-color");
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource:///modules/devtools/ViewHelpers.jsm");
@@ -16,6 +19,7 @@ const GRADIENT_RE = /\b(repeating-)?(linear|radial)-gradient\(((rgb|hsl)a?\(.+?\
 const BORDERCOLOR_RE = /^border-[-a-z]*color$/ig;
 const BORDER_RE = /^border(-(top|bottom|left|right))?$/ig;
 const BACKGROUND_IMAGE_RE = /url\([\'\"]?(.*?)[\'\"]?\)/;
+const XHTML_NS = "http://www.w3.org/1999/xhtml";
 
 /**
  * Tooltip widget.
@@ -38,23 +42,55 @@ const BACKGROUND_IMAGE_RE = /url\([\'\"]?(.*?)[\'\"]?\)/;
  */
 
 /**
+ * Contains defaults options for tooltips
+ */
+function OptionsStore(options) {
+  this.defaults = {
+    xulTagName: "panel",
+    consumeOutsideClick: false,
+    closeOnKeys: [27]
+  };
+  this.options = options || {};
+}
+
+OptionsStore.prototype = {
+  get: function(name) {
+    if (typeof this.options[name] !== "undefined") {
+      return this.options[name];
+    } else {
+      return this.defaults[name];
+    }
+  }
+};
+
+/**
  * The low level structure of a tooltip is a XUL element (a <panel>, although
  * <tooltip> is supported too, it won't have the nice arrow shape).
  */
 let PanelFactory = {
-  get: function(doc, xulTag="panel") {
-    // Create the tooltip
-    let panel = doc.createElement(xulTag);
-    panel.setAttribute("hidden", true);
+  /**
+   * Get a new XUL panel instance.
+   * @param {XULDocument} doc
+   *        The XUL document to put that panel into
+   * @param {OptionsStore} options
+   *        An options store to get some configuration from
+   */
+  get: function(doc, options) {
+    let xulTagName = options.get("xulTagName");
+    let consumeOutsideClick = options.get("consumeOutsideClick");
 
-    if (xulTag === "panel") {
-      // Prevent the click used to close the panel from being consumed
-      panel.setAttribute("consumeoutsideclicks", false);
+    // Create the tooltip
+    let panel = doc.createElement(xulTagName);
+    panel.setAttribute("hidden", true);
+    panel.setAttribute("ignorekeys", true);
+
+    if (xulTagName === "panel") {
+      panel.setAttribute("consumeoutsideclicks", consumeOutsideClick);
       panel.setAttribute("type", "arrow");
       panel.setAttribute("level", "top");
     }
 
-    panel.setAttribute("class", "devtools-tooltip devtools-tooltip-" + xulTag);
+    panel.setAttribute("class", "devtools-tooltip devtools-tooltip-" + xulTagName);
     doc.querySelector("window").appendChild(panel);
 
     return panel;
@@ -81,15 +117,50 @@ let PanelFactory = {
  *   });
  *   t.destroy();
  *
- * @param XULDocument doc
+ * @param {XULDocument} doc
  *        The XUL document hosting this tooltip
+ * @param {Object} options
+ *        Optional options that give options to consumers
+ *        - consumeOutsideClick {Boolean} Wether the first click outside of the
+ *        tooltip should close the tooltip and be consumed or not.
+ *        Defaults to false
+ *        - xulTagName {String} Should we use a "panel" or a "tooltip".
+ *        Defaults to "panel"
+ *        - closeOnKeys {Array} An array of key codes that should close the
+ *        tooltip. Defaults to [27] (escape key)
+ *
+ * Fires these events:
+ * - shown : when the tooltip is shown
+ * - hidden : when the tooltip gets hidden
+ * - keypress : when any key gets pressed, with keyCode
  */
-function Tooltip(doc) {
+function Tooltip(doc, options) {
+  EventEmitter.decorate(this);
+
   this.doc = doc;
-  this.panel = PanelFactory.get(doc);
+  this.options = new OptionsStore(options);
+  this.panel = PanelFactory.get(doc, this.options);
 
   // Used for namedTimeouts in the mouseover handling
   this.uid = "tooltip-" + Date.now();
+
+  // Listen to popupshown to emit a shown event
+  this._onPopupShown = event => this.emit("shown");
+  this.panel.addEventListener("popupshown", this._onPopupShown, false);
+
+  // Listen to popuphidden to emit a hidden event
+  this._onPopupHidden = event => this.emit("hidden");
+  this.panel.addEventListener("popuphidden", this._onPopupHidden, false);
+
+  // Listen to keypress events to close the tooltip if configured to do so
+  let win = this.doc.querySelector("window");
+  this._onKeyPress = event => {
+    this.emit("keypress", event.keyCode);
+    if (this.options.get("closeOnKeys").indexOf(event.keyCode) !== -1) {
+      this.hide();
+    }
+  };
+  win.addEventListener("keypress", this._onKeyPress, false);
 }
 
 module.exports.Tooltip = Tooltip;
@@ -98,7 +169,7 @@ Tooltip.prototype = {
   /**
    * Show the tooltip. It might be wise to append some content first if you
    * don't want the tooltip to be empty. You may access the content of the
-   * tooltip by setting a XUL node to t.tooltip.content.
+   * tooltip by setting a XUL node to t.content.
    * @param {node} anchor
    *        Which node should the tooltip be shown on
    * @param {string} position
@@ -132,8 +203,13 @@ Tooltip.prototype = {
    */
   destroy: function () {
     this.hide();
-    this.content = null;
 
+    this.panel.removeEventListener("popupshown", this._onPopupShown, false);
+    this.panel.removeEventListener("popuphidden", this._onPopupHidden, false);
+    let win = this.doc.querySelector("window");
+    win.removeEventListener("keypress", this._onKeyPress, false);
+
+    this.content = null;
     this.doc = null;
 
     this.panel.parentNode.removeChild(this.panel);
@@ -296,6 +372,49 @@ Tooltip.prototype = {
   },
 
   /**
+   * Fill the tooltip with a new instance of the spectrum color picker widget
+   * initialized with the given color, and return a promise that resolves to
+   * the instance of spectrum
+   */
+  setColorPickerContent: function(color) {
+    let def = promise.defer();
+
+    // Create an iframe to contain spectrum
+    let iframe = this.doc.createElementNS(XHTML_NS, "iframe");
+    iframe.setAttribute("transparent", true);
+    iframe.setAttribute("width", "210");
+    iframe.setAttribute("height", "195");
+    iframe.setAttribute("flex", "1");
+    iframe.setAttribute("class", "devtools-tooltip-iframe");
+
+    let panel = this.panel;
+    let xulWin = this.doc.ownerGlobal;
+
+    // Wait for the load to initialize spectrum
+    function onLoad() {
+      iframe.removeEventListener("load", onLoad, true);
+      let win = iframe.contentWindow.wrappedJSObject;
+
+      let container = win.document.getElementById("spectrum");
+      let spectrum = new Spectrum(container, color);
+
+      // Finalize spectrum's init when the tooltip becomes visible
+      panel.addEventListener("popupshown", function shown() {
+        panel.removeEventListener("popupshown", shown, true);
+        spectrum.show();
+        def.resolve(spectrum);
+      }, true);
+    }
+    iframe.addEventListener("load", onLoad, true);
+    iframe.setAttribute("src", "chrome://browser/content/devtools/spectrum-frame.xhtml");
+
+    // Put the iframe in the tooltip
+    this.content = iframe;
+
+    return def.promise;
+  },
+
+  /**
    * Exactly the same as the `image` function but takes a css background image
    * value instead : url(....)
    */
@@ -355,6 +474,132 @@ Tooltip.prototype = {
       {name: "background", value: "white"},
       {name: "border", value: cssBorder}
     ], 80, 80);
+  }
+};
+
+/**
+ * The swatch color picker tooltip class is a specific class meant to be used
+ * along with output-parser's generated color swatches.
+ * It just wraps a standard Tooltip and sets its content with an instance of a
+ * color picker.
+ *
+ * @param {XULDocument} doc
+ *
+ * Fires the following events:
+ * - shown : same as Tooltip's shown event
+ * - hidden : same as Tooltip's hidden event
+ * - revert : when the user presses <escape> to close the picker. Listeners
+ * will be executed with the previousColor argument, which is the css color
+ * value that was used to open the color picker in the first place
+ * - commit : when the user presses <enter> to close the picker. Listeners will
+ * be executed with the color argument, which is the css color value being
+ * picked
+ * - changed : when the color changes in the color picker. Same as for commit,
+ * the color argument will be passed
+ */
+function SwatchColorPickerTooltip(doc) {
+  EventEmitter.decorate(this);
+
+  this.previousColor = null;
+  this.currentColor = null;
+
+  // Creating a tooltip instance
+  // This one will consume outside clicks as it makes more sense to let the user
+  // close the tooltip by clicking out
+  // It will also close on <escape> (27) and <enter> (13)
+  this.tooltip = new Tooltip(doc, {
+    consumeOutsideClick: true,
+    closeOnKeys: [27, 13]
+  });
+
+  // Firing revert/commit events on <esc> and <enter> keypresses
+  this._onTooltipKeypress = (event, code) => {
+    if (code === 27) {
+      this.emit("revert", this.previousColor);
+    } else if (code === 13) {
+      this.emit("commit", this.currentColor);
+    }
+  };
+  this.tooltip.on("keypress", this._onTooltipKeypress);
+
+  // Just relaying these events for convenience
+  this._onTooltipShown = () => this.emit("shown");
+  this._onTooltipHidden = () => this.emit("hidden");
+  this.tooltip.on("shown", this._onTooltipShown);
+  this.tooltip.on("hidden", this._onTooltipHidden);
+
+  // Loading spectrum into the tooltip is async, so store the last show request
+  // and execute it when spectrum is created
+  this._queued = null;
+
+  // Creating a spectrum instance
+  this.spectrum = null;
+  this.tooltip.setColorPickerContent([0, 0, 0, 1]).then(spectrum => {
+    this.spectrum = spectrum;
+    if (this._queued) {
+      this._setSpectrumOptions(this._queued);
+      this._queued = null;
+    }
+  });
+}
+
+module.exports.SwatchColorPickerTooltip = SwatchColorPickerTooltip;
+
+SwatchColorPickerTooltip.prototype = {
+  /**
+   * Show the color picker on a given element.
+   * @param {Object} options
+   *        Object with the following properties
+   *        - colorSwatch {nsIDOMElement} the element to attach the tooltip to.
+   *        This must be a color swatch that has been generated by the output-
+   *        parser. It will have its background-color set when the color changes
+   *        in the color picker. Also, colorSwatch.nextSibling's textContent
+   *        will be changed to the color too.
+   *        - color {string} a colorUtils parsable color string
+   */
+  show: function(options) {
+    this.previousColor = options.color;
+
+    this._setSpectrumOptions(options);
+    if (!this.spectrum) {
+      this._queued = options;
+    }
+    this.tooltip.show(options.colorSwatch, "topcenter bottomleft");
+  },
+
+  hide: function() {
+    this.tooltip.hide();
+  },
+
+  _setSpectrumOptions: function(options) {
+    if (this.spectrum) {
+      this.spectrum.rgb = this._colorToRgba(options.color);
+
+      this.spectrum.addChangeListener((rgba, color) => {
+        options.colorSwatch.style.backgroundColor = color;
+        options.colorSwatch.nextSibling.textContent = color;
+        this.currentColor = color;
+        this.emit("changed", color);
+      });
+
+      this.spectrum.updateUI();
+    }
+  },
+
+  _colorToRgba: function(color) {
+    color = new colorUtils.CssColor(color);
+    let rgba = color._getRGBATuple();
+    return [rgba.r, rgba.g, rgba.b, rgba.a];
+  },
+
+  destroy: function() {
+    if (this.spectrum) {
+      this.spectrum.destroy();
+    }
+    this.tooltip.off("shown", this._onTooltipShown);
+    this.tooltip.off("hidden", this._onTooltipHidden);
+    this.tooltip.off("keypress", this._onTooltipKeypress);
+    this.tooltip.destroy();
   }
 };
 
