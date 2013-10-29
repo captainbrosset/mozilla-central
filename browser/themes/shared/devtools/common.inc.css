@@ -128,6 +128,15 @@
   padding: 4px;
 }
 
+.devtools-tooltip .panel-arrowcontainer {
+  /* Reseting the transition used when panels are shown */
+  transition: none;
+  /* Panels slide up/down/left/right when they appear using a transform.
+  Since we want to remove the transition, we don't need to transform anymore
+  plus it can interfeer by causing mouseleave events on the underlying nodes */
+  transform: none;
+}
+
 .devtools-tooltip-simple-text {
   background: linear-gradient(1deg, transparent 0%, rgba(94,136,176,0.1) 100%);
   max-width: 400px;

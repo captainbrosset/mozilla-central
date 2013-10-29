@@ -50,8 +50,6 @@ function createDocument() {
 }
 
 function startTests() {
-  // let testElement = contentDoc.querySelector(".test-element");
-
   inspector.selection.setNode(contentDoc.body);
   inspector.once("inspector-updated", testBodyRuleView);
 }
@@ -81,17 +79,48 @@ function testBodyRuleView() {
   ok(panel, "XUL panel exists");
 
   // Get the background-image property inside the rule view
-  let {nameSpan, valueSpan} = getRuleViewProperty("background-image");
+  let {valueSpan} = getRuleViewProperty("background-image");
+  let uriSpan = valueSpan.querySelector(".theme-link");
+
   // And verify that the tooltip gets shown on this property
-  assertTooltipShownOn(ruleView.tooltip, valueSpan, () => {
+  assertTooltipShownOn(ruleView.tooltip, uriSpan, () => {
     let images = panel.getElementsByTagName("image");
     is(images.length, 1, "Tooltip contains an image");
     ok(images[0].src.indexOf("iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHe") !== -1, "The image URL seems fine");
 
     ruleView.tooltip.hide();
 
-    inspector.selection.setNode(contentDoc.querySelector(".test-element"));
-    inspector.once("inspector-updated", testDivRuleView);
+    testScrollingHidesTooltip();
+  });
+}
+
+function testScrollingHidesTooltip() {
+  let panel = ruleView.tooltip.panel;
+
+  let {valueSpan} = getRuleViewProperty("background-image");
+  let uriSpan = valueSpan.querySelector(".theme-link");
+  assertTooltipShownOn(ruleView.tooltip, uriSpan, () => {
+    // The tooltip is shown now
+    // Scroll and verify that it hides
+    ruleView.doc.defaultView.addEventListener("scroll", function onDocScroll() {
+      ruleView.doc.defaultView.removeEventListener("scroll", onDocScroll, false);
+      info("Detected scroll event");
+
+      // That executeSoon is required to let the panel react to the scroll and
+      // hide itself before we test if it's hidden or not
+      executeSoon(() => {
+        ok(panel.hidden, "Scrolling down closed the tooltip");
+        inspector.selection.setNode(contentDoc.querySelector(".test-element"));
+        inspector.once("inspector-updated", testDivRuleView);
+      });
+    }, false);
+
+    executeSoon(function() {
+      info("Simulating a scroll event now");
+      EventUtils.synthesizeWheel(uriSpan, 10, 10,
+        {deltaY: 50, deltaMode: WheelEvent.DOM_DELTA_PIXEL},
+        ruleView.doc.defaultView);
+    });
   });
 }
 
@@ -99,7 +128,7 @@ function testDivRuleView() {
   let panel = ruleView.tooltip.panel;
 
   // Get the background property inside the rule view
-  let {nameSpan, valueSpan} = getRuleViewProperty("background");
+  let {valueSpan} = getRuleViewProperty("background");
   let uriSpan = valueSpan.querySelector(".theme-link");
 
   // And verify that the tooltip gets shown on this property
@@ -110,8 +139,29 @@ function testDivRuleView() {
 
     ruleView.tooltip.hide();
 
-    testComputedView();
+    testTooltipAppearsEvenInEditMode();
   });
+}
+
+function testTooltipAppearsEvenInEditMode() {
+  let panel = ruleView.tooltip.panel;
+
+  // Switch one field to edit mode
+  let brace = ruleView.doc.querySelector(".ruleview-ruleclose");
+  waitForEditorFocus(brace.parentNode, editor => {
+    // Now try to show the tooltip
+    let {valueSpan} = getRuleViewProperty("background");
+    let uriSpan = valueSpan.querySelector(".theme-link");
+    assertTooltipShownOn(ruleView.tooltip, uriSpan, () => {
+      is(ruleView.doc.activeElement, editor.input,
+        "Tooltip was shown in edit mode, and inplace-editor still focused");
+
+      ruleView.tooltip.hide();
+
+      testComputedView();
+    });
+  });
+  brace.click();
 }
 
 function testComputedView() {
@@ -122,7 +172,7 @@ function testComputedView() {
   let doc = computedView.styleDocument;
 
   let panel = computedView.tooltip.panel;
-  let {nameSpan, valueSpan} = getComputedViewProperty("background-image");
+  let {valueSpan} = getComputedViewProperty("background-image");
 
   assertTooltipShownOn(computedView.tooltip, valueSpan, () => {
     let images = panel.getElementsByTagName("image");

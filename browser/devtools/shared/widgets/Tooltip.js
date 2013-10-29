@@ -16,6 +16,7 @@ const GRADIENT_RE = /\b(repeating-)?(linear|radial)-gradient\(((rgb|hsl)a?\(.+?\
 const BORDERCOLOR_RE = /^border-[-a-z]*color$/ig;
 const BORDER_RE = /^border(-(top|bottom|left|right))?$/ig;
 const BACKGROUND_IMAGE_RE = /url\([\'\"]?(.*?)[\'\"]?\)/;
+const SHOW_TIMEOUT = 50;
 
 /**
  * Tooltip widget.
@@ -50,6 +51,7 @@ let PanelFactory = {
     if (xulTag === "panel") {
       // Prevent the click used to close the panel from being consumed
       panel.setAttribute("consumeoutsideclicks", false);
+      panel.setAttribute("noautofocus", true);
       panel.setAttribute("type", "arrow");
       panel.setAttribute("level", "top");
     }
@@ -106,8 +108,12 @@ Tooltip.prototype = {
    * @param {node} anchor
    *        Which node should the tooltip be shown on
    * @param {string} position
+   *        Optional tooltip position. Defaults to before_start
    *        https://developer.mozilla.org/en-US/docs/XUL/PopupGuide/Positioning
-   *        Defaults to before_start
+   * @param {number} x
+   *        Optional x offset. Defaults to 0
+   * @param {number} y
+   *        Optional y offset. Defaults to 0
    */
   show: function(anchor,
     position = this.defaultPosition,
@@ -141,14 +147,15 @@ Tooltip.prototype = {
     this.hide();
     this.content = null;
 
+    if (this._basedNode) {
+      this.stopTogglingOnHover();
+    }
+
     this.doc = null;
 
     this.panel.parentNode.removeChild(this.panel);
     this.panel = null;
 
-    if (this._basedNode) {
-      this.stopTogglingOnHover();
-    }
   },
 
   /**
@@ -181,16 +188,12 @@ Tooltip.prototype = {
    *        tooltip if needed. If omitted, the tooltip will be shown everytime.
    * @param {Number} showDelay
    *        An optional delay that will be observed before showing the tooltip.
-   *        Defaults to 750ms
+   *        Defaults to SHOW_TIMEOUT
    */
-  startTogglingOnHover: function(baseNode, targetNodeCb, showDelay = 750) {
+  startTogglingOnHover: function(baseNode, targetNodeCb, showDelay = SHOW_TIMEOUT) {
     if (this._basedNode) {
       this.stopTogglingOnHover();
     }
-
-    // If no targetNodeCb callback is provided, then we need to hide the tooltip
-    // on mouseleave since baseNode is the target node itself
-    this._hideOnMouseLeave = !targetNodeCb;
 
     this._basedNode = baseNode;
     this._showDelay = showDelay;
@@ -198,9 +201,11 @@ Tooltip.prototype = {
 
     this._onBaseNodeMouseMove = this._onBaseNodeMouseMove.bind(this);
     this._onBaseNodeMouseLeave = this._onBaseNodeMouseLeave.bind(this);
+    this._onDocScroll = this._onDocScroll.bind(this);
 
     baseNode.addEventListener("mousemove", this._onBaseNodeMouseMove, false);
     baseNode.addEventListener("mouseleave", this._onBaseNodeMouseLeave, false);
+    this.doc.addEventListener("scroll", this._onDocScroll, false);
   },
 
   /**
@@ -215,6 +220,7 @@ Tooltip.prototype = {
       this._onBaseNodeMouseMove, false);
     this._basedNode.removeEventListener("mouseleave",
       this._onBaseNodeMouseLeave, false);
+    this.doc.removeEventListener("scroll", this._onDocScroll, false);
 
     this._basedNode = null;
     this._targetNodeCb = null;
@@ -224,7 +230,7 @@ Tooltip.prototype = {
   _onBaseNodeMouseMove: function(event) {
     if (event.target !== this._lastHovered) {
       this.hide();
-      this._lastHovered = null;
+      this._lastHovered = event.target;
       setNamedTimeout(this.uid, this._showDelay, () => {
         this._showOnHover(event.target);
       });
@@ -234,16 +240,17 @@ Tooltip.prototype = {
   _showOnHover: function(target) {
     if (this._targetNodeCb(target, this)) {
       this.show(target);
-      this._lastHovered = target;
     }
   },
 
   _onBaseNodeMouseLeave: function() {
     clearNamedTimeout(this.uid);
     this._lastHovered = null;
-    if (this._hideOnMouseLeave) {
-      this.hide();
-    }
+    this.hide();
+  },
+
+  _onDocScroll: function() {
+    this.hide();
   },
 
   /**
@@ -267,7 +274,7 @@ Tooltip.prototype = {
   /**
    * Sets some text as the content of this tooltip.
    *
-   * @param string[] messages
+   * @param {string[]} messages
    *        A list of text messages.
    */
   setTextContent: function(...messages) {
