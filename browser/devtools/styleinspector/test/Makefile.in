@@ -40,6 +40,7 @@ MOCHITEST_BROWSER_FILES = \
   browser_bug913014_matched_expand.js \
   browser_bug765105_background_image_tooltip.js \
   browser_bug889638_rule_view_color_picker.js \
+  browser_bug726427_csstransform_tooltip.js \
   head.js \
   $(NULL)
 

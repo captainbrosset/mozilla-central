@@ -12,6 +12,7 @@ const {Spectrum} = require("devtools/shared/widgets/Spectrum");
 const EventEmitter = require("devtools/shared/event-emitter");
 const {colorUtils} = require("devtools/css-color");
 const Heritage = require("sdk/core/heritage");
+const {CSSTransformPreviewer} = require("devtools/shared/widgets/CSSTransformPreviewer");
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource:///modules/devtools/ViewHelpers.jsm");
@@ -24,7 +25,6 @@ const XHTML_NS = "http://www.w3.org/1999/xhtml";
 const SPECTRUM_FRAME = "chrome://browser/content/devtools/spectrum-frame.xhtml";
 const ESCAPE_KEYCODE = Ci.nsIDOMKeyEvent.DOM_VK_ESCAPE;
 const ENTER_KEYCODE = Ci.nsIDOMKeyEvent.DOM_VK_RETURN;
-const SHOW_TIMEOUT = 50;
 
 /**
  * Tooltip widget.
@@ -92,7 +92,6 @@ let PanelFactory = {
     panel.setAttribute("hidden", true);
     panel.setAttribute("ignorekeys", true);
 
-    // Prevent the click used to close the panel from being consumed
     panel.setAttribute("consumeoutsideclicks", options.get("consumeOutsideClick"));
     panel.setAttribute("noautofocus", options.get("noAutoFocus"));
     panel.setAttribute("type", "arrow");
@@ -187,6 +186,7 @@ Tooltip.prototype = {
   defaultPosition: "before_start",
   defaultOffsetX: 0,
   defaultOffsetY: 0,
+  defaultShowDelay: 50,
 
   /**
    * Show the tooltip. It might be wise to append some content first if you
@@ -220,6 +220,10 @@ Tooltip.prototype = {
 
   isShown: function() {
     return this.panel.state !== "closed" && this.panel.state !== "hiding";
+  },
+
+  setSize: function(width, height) {
+    this.panel.sizeTo(width, height);
   },
 
   /**
@@ -281,15 +285,16 @@ Tooltip.prototype = {
    *        The container for all target nodes
    * @param {Function} targetNodeCb
    *        A function that accepts a node argument and returns true or false
-   *        to signify if the tooltip should be shown on that node or not.
+   *        (or a promise that resolves or rejects) to signify if the tooltip
+   *        should be shown on that node or not.
    *        Additionally, the function receives a second argument which is the
    *        tooltip instance itself, to be used to add/modify the content of the
    *        tooltip if needed. If omitted, the tooltip will be shown everytime.
    * @param {Number} showDelay
    *        An optional delay that will be observed before showing the tooltip.
-   *        Defaults to SHOW_TIMEOUT
+   *        Defaults to this.defaultShowDelay
    */
-  startTogglingOnHover: function(baseNode, targetNodeCb, showDelay=SHOW_TIMEOUT) {
+  startTogglingOnHover: function(baseNode, targetNodeCb, showDelay=this.defaultShowDelay) {
     if (this._basedNode) {
       this.stopTogglingOnHover();
     }
@@ -334,7 +339,12 @@ Tooltip.prototype = {
   },
 
   _showOnHover: function(target) {
-    if (this._targetNodeCb(target, this)) {
+    let res = this._targetNodeCb(target, this);
+    if (res && res.then) {
+      res.then(() => {
+        this.show(target);
+      });
+    } else if (res) {
       this.show(target);
     }
   },
@@ -434,6 +444,8 @@ Tooltip.prototype = {
       let w = options.naturalWidth || imgObj.naturalWidth;
       let h = options.naturalHeight || imgObj.naturalHeight;
       label.textContent = w + " x " + h;
+
+      this.setSize(vbox.width, vbox.height);
     }
   },
 
@@ -489,6 +501,60 @@ Tooltip.prototype = {
 
     // Put the iframe in the tooltip
     this.content = iframe;
+
+    return def.promise;
+  },
+
+  /**
+   * Set the content of the tooltip to be the result of CSSTransformPreviewer.
+   * Meaning a canvas previewing a css transformation.
+   *
+   * @param {String} transform
+   *        The CSS transform value (e.g. "rotate(45deg) translateX(50px)")
+   * @param {String} origin
+   *        The CSS transform-origin value (e.g. "center top"). This is optional
+   *        and if not provided, the pageStyle actor and node actor will be used
+   *        to get the computed transform-origin
+   * @param {PageStyleActor} pageStyle
+   *        An instance of the PageStyleActor that will be used to retrieve
+   *        computed styles
+   * @param {NodeActor} node
+   *        The NodeActor for the currently selected node
+   * @return A promise that resolves when the tooltip content is ready, or
+   *         rejects if no transform is provided or is invalid
+   */
+  setCssTransformContent: function(transform, origin, pageStyle, node) {
+    let def = promise.defer();
+
+    if (transform) {
+      // Look into the computed styles to find the width and height and possibly
+      // the origin if it hadn't been provided
+      pageStyle.getComputed(node, {
+        filter: "user",
+        markMatched: false,
+        onlyMatched: false
+      }).then(styles => {
+        if (!origin) {
+          origin = styles["transform-origin"].value;
+        }
+        let width = parseInt(styles["width"].value);
+        let height = parseInt(styles["height"].value);
+
+        let root = this.doc.createElementNS(XHTML_NS, "div");
+        let previewer = new CSSTransformPreviewer(root);
+        this.content = root;
+        if (!previewer.preview(transform, origin, width, height)) {
+          // If the preview didn't work, reject the promise
+          def.reject();
+        } else {
+          // Else, make sure the tooltip has the right size and resolve
+          this.setSize(previewer.canvas.width, previewer.canvas.height);
+          def.resolve();
+        }
+      });
+    } else {
+      def.reject();
+    }
 
     return def.promise;
   }
