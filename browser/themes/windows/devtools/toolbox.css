@@ -125,6 +125,23 @@
   -moz-image-region: rect(0px, 48px, 16px, 32px);
 }
 
+#command-button-picked {
+  list-style-image: url("chrome://browser/skin/devtools/command-picked.png");
+  -moz-image-region: rect(0px, 16px, 16px, 0px);
+}
+
+#command-button-picked:hover {
+  -moz-image-region: rect(0px, 32px, 16px, 16px);
+}
+
+#command-button-picked:hover:active {
+  -moz-image-region: rect(0px, 48px, 16px, 32px);
+}
+
+#command-button-picked[checked=true] {
+  -moz-image-region: rect(0px, 64px, 16px, 48px);
+}
+
 /* Tabs */
 
 .devtools-tabbar {

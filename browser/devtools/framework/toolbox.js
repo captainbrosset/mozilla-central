@@ -8,6 +8,7 @@ const MAX_ORDINAL = 99;
 const ZOOM_PREF = "devtools.toolbox.zoomValue";
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2;
+const HIGHLIGHTER_PICKED_TIMER = 1000;
 
 let {Cc, Ci, Cu} = require("chrome");
 let promise = require("sdk/core/promise");
@@ -44,6 +45,10 @@ loader.lazyGetter(this, "Requisition", () => {
   Cu.import("resource://gre/modules/devtools/gcli.jsm", {});
   return require("gcli/cli").Requisition;
 });
+
+loader.lazyGetter(this, "Selection", () => require("devtools/framework/selection").Selection);
+loader.lazyGetter(this, "HighlighterFront", () => require("devtools/server/actors/highlighter").HighlighterFront);
+loader.lazyGetter(this, "InspectorFront", () => require("devtools/server/actors/inspector").InspectorFront);
 
 /**
  * A "Toolbox" is the component that holds all the tools for one specific
@@ -183,6 +188,29 @@ Toolbox.prototype = {
   },
 
   /**
+   * Get the toolbox highlighterFront instance
+   */
+  get highlighter() {
+    if (this.isHighlightable) {
+      return this._highlighter;
+    } else {
+      return null;
+    }
+  },
+
+  get inspector() {
+    return this._inspector;
+  },
+
+  get walker() {
+    return this._walker;
+  },
+
+  get selection() {
+    return this._selection;
+  },
+
+  /**
    * Open the toolbox
    */
   open: function() {
@@ -206,11 +234,28 @@ Toolbox.prototype = {
         this._addZoomKeys();
         this._loadInitialZoom();
 
-        this._telemetry.toolOpened("toolbox");
+        // Load the toolbox-level actor fronts and utilities now
+        this._target.makeRemote().then(() => {
+          if (this.isHighlightable) {
+            // The highlighter
+            this._highlighter = HighlighterFront(this._target.client, this._target.form);
+          }
+          // The inspector front
+          this._inspector = InspectorFront(this._target.client, this._target.form);
+          // The walker front
+          this._inspector.getWalker().then(walker => {
+            this._walker = walker;
 
-        this.selectTool(this._defaultToolId).then(panel => {
-          this.emit("ready");
-          deferred.resolve();
+            // And the selection handler
+            this._selection = new Selection(this._walker);
+
+            this._telemetry.toolOpened("toolbox");
+
+            this.selectTool(this._defaultToolId).then(panel => {
+              this.emit("ready");
+              deferred.resolve();
+            });
+          });
         });
       };
 
@@ -395,7 +440,6 @@ Toolbox.prototype = {
     }
   },
 
-
   /**
    * Handle any custom key events.  Returns true if there was a custom key binding run
    * @param {string} toolId
@@ -464,9 +508,11 @@ Toolbox.prototype = {
   },
 
   /**
-   * Add buttons to the UI as specified in the devtools.window.toolbarSpec pref
+   * Add buttons to the UI as specified in the devtools.toolbox.toolbarSpec pref
    */
   _buildButtons: function() {
+    this._buildPickerButton();
+
     if (!this.target.isLocalTab) {
       return;
     }
@@ -478,6 +524,23 @@ Toolbox.prototype = {
     let buttons = CommandUtils.createButtons(spec, this._target, this.doc, req);
     let container = this.doc.getElementById("toolbox-buttons");
     buttons.forEach(container.appendChild.bind(container));
+  },
+
+  /**
+   * Adding the element picker button is done here unlike the other buttons
+   * since we want it to work for remote targets too
+   */
+  _buildPickerButton: function() {
+    this._pickerButton = this.doc.createElement("toolbarbutton");
+    this._pickerButton.id = "command-button-pick";
+    this._pickerButton.className = "command-button";
+    this._pickerButton.setAttribute("tooltiptext", toolboxStrings("pickButton.tooltip"));
+
+    let container = this.doc.querySelector("#toolbox-buttons");
+    container.appendChild(this._pickerButton);
+
+    this.togglePicker = this.togglePicker.bind(this);
+    this._pickerButton.addEventListener("command", this.togglePicker, false);
   },
 
   /**
@@ -937,6 +1000,65 @@ Toolbox.prototype = {
   },
 
   /**
+   * Start/stop the element picker on the debuggee target.
+   */
+  togglePicker: function() {
+    if (this._isPicking) {
+      this.stopPicker();
+    } else {
+      this.startPicker();
+    }
+  },
+
+  /**
+   * Start the element picker on the debuggee target.
+   * This will request the inspector actor to start listening for mouse/touch
+   * events on the target to highlight the hovered/picked element.
+   * Depending on the server-side capabilities, this may fire events when nodes
+   * are hovered.
+   */
+  startPicker: function() {
+    this._isPicking = true;
+    this._pickerButton.setAttribute("checked", "true");
+    this.walker.pick().then(node => {
+      this._onPicked(node);
+    }, () => {
+      this._onPicked(null);
+    });
+    // No need to test if isHighlightable here since picker-node-hovered events
+    // are only fired if isHighlightable is true anyway
+    this._onPickerNodeHovered = res => {
+      this.highlighter.showBoxModel(res.node);
+      this.selection.setNodeFront(res.node);
+    };
+    this.walker.on("picker-node-hovered", this._onPickerNodeHovered);
+  },
+
+  get isHighlightable() {
+    return this._target.client.traits.highlightable;
+  },
+
+  _onPicked: function(node) {
+    if (this.isHighlightable) {
+      this.doc.defaultView.setTimeout(() => {
+        this.highlighter.hideBoxModel();
+      }, HIGHLIGHTER_PICKED_TIMER);
+      this.walker.off("picker-node-hovered", this._onPickerNodeHovered);
+    }
+    this.selection.setNodeFront(node);
+    this.stopPicker();
+  },
+
+  /**
+   * Stop the element picker
+   */
+  stopPicker: function() {
+    this._isPicking = false;
+    this._pickerButton.removeAttribute("checked");
+    this.walker.cancelPick();
+  },
+
+  /**
    * Get the toolbox's notification box
    *
    * @return The notification box element.
@@ -983,6 +1105,7 @@ Toolbox.prototype = {
 
     let outstanding = [];
 
+    // Destroying each panel
     for (let [id, panel] of this._toolPanels) {
       try {
         outstanding.push(panel.destroy());
@@ -992,6 +1115,23 @@ Toolbox.prototype = {
       }
     }
 
+    // Destroying the selection after each panel has been destroyed
+    outstanding.push(() => {
+      this._selection.destroy();
+      this._selection = null;
+    });
+
+    // Destroying the walker and inspector fronts
+    outstanding.push(this._walker.release().then(() => {
+      this._inspector.destroy();
+    }).then(() => {
+      this._inspector = null;
+      this._walker = null;
+    }), console.error);
+
+    // Removing buttons
+    this._pickerButton.removeEventListener("command", this.togglePicker, false);
+    this._pickerButton = null;
     let container = this.doc.getElementById("toolbox-buttons");
     while (container.firstChild) {
       container.removeChild(container.firstChild);

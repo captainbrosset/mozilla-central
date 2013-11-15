@@ -64,9 +64,7 @@ const { Class } = require("sdk/core/heritage");
 const {PageStyleActor} = require("devtools/server/actors/styles");
 
 const PSEUDO_CLASSES = [":hover", ":active", ":focus"];
-
 const HIDDEN_CLASS = "__fx-devtools-hide-shortcut__";
-
 const HIGHLIGHTED_PSEUDO_CLASS = ":-moz-devtools-highlighted";
 const HIGHLIGHTED_TIMEOUT = 2000;
 
@@ -77,7 +75,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/devtools/LayoutHelpers.jsm");
 
 loader.lazyGetter(this, "DOMParser", function() {
- return Cc["@mozilla.org/xmlextras/domparser;1"].createInstance(Ci.nsIDOMParser);
+  return Cc["@mozilla.org/xmlextras/domparser;1"].createInstance(Ci.nsIDOMParser);
 });
 
 exports.register = function(handle) {
@@ -135,7 +133,7 @@ exports.setValueSummaryLength = function(val) {
 /**
  * Server side of the node actor.
  */
-var NodeActor = protocol.ActorClass({
+var NodeActor = exports.NodeActor = protocol.ActorClass({
   typeName: "domnode",
 
   initialize: function(walker, node) {
@@ -847,6 +845,10 @@ var WalkerActor = protocol.ActorClass({
   events: {
     "new-mutations" : {
       type: "newMutations"
+    },
+    "picker-node-hovered" : {
+      type: "pickerNodeHovered",
+      node: Arg(0, "disconnectedNode")
     }
   },
 
@@ -941,7 +943,12 @@ var WalkerActor = protocol.ActorClass({
   },
 
   /**
-   * Pick a node on click.
+   * Pick a node on click/touchstart.
+   * Will also highlight hovered nodes on mouseover using the highlighter actor.
+   *
+   * Note that even if this method uses the remote highlighter introduced in
+   * Firefox XX (FIXME: add version here), it has the same signature and basic
+   * behavior than its predecessor, making it compatible with older debuggees.
    */
   _pickDeferred: null,
   pick: method(function() {
@@ -953,79 +960,102 @@ var WalkerActor = protocol.ActorClass({
 
     let window = this.rootDoc.defaultView;
     let isTouch = 'ontouchstart' in window;
-    let event = isTouch ? 'touchstart' : 'click';
 
-    this._onPick = function(e) {
-      e.stopImmediatePropagation();
-      e.preventDefault();
-      window.removeEventListener(event, this._onPick, true);
-      let u = window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+    this._preventContentEvent = event => {
+      event.stopPropagation();
+      event.preventDefault();
+    };
 
-      let x, y;
-      if (isTouch) {
-        x = e.touches[0].clientX;
-        y = e.touches[0].clientY;
-      } else {
-        x = e.clientX;
-        y = e.clientY;
-      }
+    this._onPick = event => {
+      this._preventContentEvent(event);
 
-      let node = u.elementFromPoint(x, y, false, false);
-      node = this._ref(node);
-      let newParents = this.ensurePathToRoot(node);
+      this._stopPickerListeners();
 
-      this._pickDeferred.resolve({
-        node: node,
-        newParents: [parent for (parent of newParents)]
-      });
+      this._pickDeferred.resolve(this._findAndAttachElement(event));
       this._pickDeferred = null;
+    };
 
-    }.bind(this);
+    this._onHovered = event => {
+      this._preventContentEvent(event);
 
-    window.addEventListener(event, this._onPick, true);
+      events.emit(this, "picker-node-hovered", this._findAndAttachElement(event));
+    };
+
+    this._startPickerListeners();
 
     return this._pickDeferred.promise;
-  }, { request: { }, response: RetVal("disconnectedNode") }),
+  }, {request: {}, response: RetVal("disconnectedNode")}),
+
+  _findAndAttachElement: function(event) {
+    let win = this.rootDoc.defaultView;
+    let isTouch = 'ontouchstart' in win;
+
+    let u = win.QueryInterface(Ci.nsIInterfaceRequestor)
+      .getInterface(Ci.nsIDOMWindowUtils);
+
+    let x, y;
+    if (isTouch) {
+      x = event.touches[0].clientX;
+      y = event.touches[0].clientY;
+    } else {
+      x = event.clientX;
+      y = event.clientY;
+    }
+
+    let node = u.elementFromPoint(x, y, false, false);
+    node = this._ref(node);
+    let newParents = this.ensurePathToRoot(node);
+
+    return {
+      node: node,
+      newParents: [parent for (parent of newParents)]
+    };
+  },
+
+  _startPickerListeners: function() {
+    let win = this.rootDoc.defaultView;
+    let isTouch = 'ontouchstart' in win;
+    if (isTouch) {
+      win.addEventListener("touchstart", this._onPick, true);
+    } else {
+      win.addEventListener("mousemove", this._onHovered, true);
+      win.addEventListener("click", this._onPick, true);
+      win.addEventListener("mousedown", this._preventContentEvent, true);
+      win.addEventListener("mouseup", this._preventContentEvent, true);
+      win.addEventListener("dblclick", this._preventContentEvent, true);
+    }
+  },
+
+  _stopPickerListeners: function() {
+    let win = this.rootDoc.defaultView;
+    let isTouch = 'ontouchstart' in win;
+    if (isTouch) {
+      win.removeEventListener("touchstart", this._onPick, true);
+    } else {
+      win.removeEventListener("mousemove", this._onHovered, true);
+      win.removeEventListener("click", this._onPick, true);
+      win.removeEventListener("mousedown", this._preventContentEvent, true);
+      win.removeEventListener("mouseup", this._preventContentEvent, true);
+      win.removeEventListener("dblclick", this._preventContentEvent, true);
+    }
+  },
 
   cancelPick: method(function() {
     if (this._pickDeferred) {
-      let window = this.rootDoc.defaultView;
-      let isTouch = 'ontouchstart' in window;
-      let event = isTouch ? 'touchstart' : 'click';
-      window.removeEventListener(event, this._onPick, true);
+      this._stopPickerListeners();
       this._pickDeferred.resolve(null);
       this._pickDeferred = null;
     }
   }),
 
   /**
-   * Simple highlight mechanism.
+   * This is kept for backward-compatibility reasons with older remote target.
    */
-  _unhighlight: function() {
-    clearTimeout(this._highlightTimeout);
-    if (!this.rootDoc) {
-      return;
+  highlight: method(function(node) {}, {
+    request: {
+      node: Arg(0, "nullable:domnode")
     }
-    let nodes = this.rootDoc.querySelectorAll(HIGHLIGHTED_PSEUDO_CLASS);
-    for (let node of nodes) {
-      DOMUtils.removePseudoClassLock(node, HIGHLIGHTED_PSEUDO_CLASS);
-    }
-  },
-
-  highlight: method(function(node) {
-    this._unhighlight();
-
-    if (!node ||
-        !node.rawNode ||
-         node.rawNode.nodeType !== Ci.nsIDOMNode.ELEMENT_NODE) {
-      return;
-    }
-
-    this._installHelperSheet(node);
-    DOMUtils.addPseudoClassLock(node.rawNode, HIGHLIGHTED_PSEUDO_CLASS);
-    this._highlightTimeout = setTimeout(this._unhighlight.bind(this), HIGHLIGHTED_TIMEOUT);
-
-  }, { request: { node: Arg(0, "nullable:domnode") }}),
+  }),
 
   /**
    * Watch the given document node for mutations using the DOM observer

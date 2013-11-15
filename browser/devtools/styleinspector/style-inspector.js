@@ -77,9 +77,6 @@ function RuleViewTool(aInspector, aWindow, aIFrame)
   this.inspector.on("layout-change", this.refresh);
 
   this.inspector.selection.on("pseudoclass", this.refresh);
-  if (this.inspector.highlighter) {
-    this.inspector.highlighter.on("locked", this._onSelect);
-  }
 
   this.onSelect();
 }
@@ -119,9 +116,6 @@ RuleViewTool.prototype = {
     this.inspector.off("layout-change", this.refresh);
     this.inspector.selection.off("pseudoclass", this.refresh);
     this.inspector.selection.off("new-node-front", this._onSelect);
-    if (this.inspector.highlighter) {
-      this.inspector.highlighter.off("locked", this._onSelect);
-    }
 
     this.view.element.removeEventListener("CssRuleViewCSSLinkClicked",
       this._cssLinkHandler);
@@ -154,9 +148,6 @@ function ComputedViewTool(aInspector, aWindow, aIFrame)
   this._onSelect = this.onSelect.bind(this);
   this.inspector.selection.on("detached", this._onSelect);
   this.inspector.selection.on("new-node-front", this._onSelect);
-  if (this.inspector.highlighter) {
-    this.inspector.highlighter.on("locked", this._onSelect);
-  }
   this.refresh = this.refresh.bind(this);
   this.inspector.on("layout-change", this.refresh);
   this.inspector.selection.on("pseudoclass", this.refresh);
@@ -208,9 +199,6 @@ ComputedViewTool.prototype = {
     this.inspector.sidebar.off("computedview-selected", this.refresh);
     this.inspector.selection.off("pseudoclass", this.refresh);
     this.inspector.selection.off("new-node-front", this._onSelect);
-    if (this.inspector.highlighter) {
-      this.inspector.highlighter.off("locked", this._onSelect);
-    }
 
     this.view.destroy();
     delete this.view;

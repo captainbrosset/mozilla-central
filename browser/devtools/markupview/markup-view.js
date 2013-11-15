@@ -100,16 +100,68 @@ function MarkupView(aInspector, aFrame, aControllerWindow) {
   gDevTools.on("pref-changed", this._handlePrefChange);
 
   this._initPreview();
-
-  this.tooltip = new Tooltip(this._inspector.panelDoc);
-  this.tooltip.startTogglingOnHover(this._elt,
-    this._buildTooltipContent.bind(this));
+  this._initTooltips();
+  this._initHighlighter();
 }
 
 exports.MarkupView = MarkupView;
 
 MarkupView.prototype = {
   _selectedContainer: null,
+
+  _initTooltips: function() {
+    this.tooltip = new Tooltip(this._inspector.panelDoc);
+    this.tooltip.startTogglingOnHover(this._elt,
+      this._buildTooltipContent.bind(this));
+  },
+
+  _initHighlighter: function() {
+    this._showBoxModel = this._showBoxModel.bind(this);
+    this._hideBoxModel = this._hideBoxModel.bind(this);
+    this._highlightedContainer = null;
+
+    this._elt.addEventListener("mousemove", this._showBoxModel, false);
+    this._elt.addEventListener("mouseleave", this._hideBoxModel, false);
+  },
+
+  _showBoxModel: function(event) {
+    let target = event.target;
+
+    // Search target for a markupContainer reference, if not found, walk up
+    while (!target.container) {
+      if (target.tagName.toLowerCase() === "body") {
+        return;
+      }
+      target = target.parentNode;
+    }
+
+    // MarkupContainer instance found
+    let container = target.container;
+    if (container !== this._highlightedContainer) {
+      this._highlightedContainer = container;
+
+      // If the remote highlighter exists on the target, use it
+      if (this._inspector._toolbox.isHighlightable) {
+        let highlighter = this._inspector._toolbox.highlighter;
+        highlighter.showBoxModel(container.node);
+      }
+      // Else, revert to the "older" version of the highlighter in the walker
+      // actor
+      else {
+        this.walker.highlight(container.node);
+      }
+    }
+  },
+
+  _hideBoxModel: function() {
+    // If the remote highlighter exists on the target, use it
+    if (this._inspector._toolbox.isHighlightable) {
+      let highlighter = this._inspector._toolbox.highlighter;
+      highlighter.hideBoxModel();
+    }
+    // If not, no need to unhighlight as the older highlight method uses a
+    // setTimeout to hide itself
+  },
 
   template: function(aName, aDest, aOptions={stack: "markup-view.xhtml"}) {
     let node = this.doc.getElementById("template-" + aName).cloneNode(true);
@@ -940,24 +992,24 @@ MarkupView.prototype = {
   destroy: function() {
     gDevTools.off("pref-changed", this._handlePrefChange);
 
-    delete this._outputParser;
+    this._outputParser = null;
 
     this.htmlEditor.destroy();
-    delete this.htmlEditor;
+    this.htmlEditor = null;
 
     this.undo.destroy();
-    delete this.undo;
+    this.undo = null;
 
     this.popup.destroy();
-    delete this.popup;
+    this.popup = null;
 
     this._frame.removeEventListener("focus", this._boundFocus, false);
-    delete this._boundFocus;
+    this._boundFocus = null;
 
     if (this._boundUpdatePreview) {
       this._frame.contentWindow.removeEventListener("scroll",
         this._boundUpdatePreview, true);
-      delete this._boundUpdatePreview;
+      this._boundUpdatePreview = null;
     }
 
     if (this._boundResizePreview) {
@@ -967,28 +1019,30 @@ MarkupView.prototype = {
         this._boundResizePreview, true);
       this._frame.contentWindow.removeEventListener("underflow",
         this._boundResizePreview, true);
-      delete this._boundResizePreview;
+      this._boundResizePreview = null;
     }
 
     this._frame.contentWindow.removeEventListener("keydown",
       this._boundKeyDown, false);
-    delete this._boundKeyDown;
+    this._boundKeyDown = null;
 
     this._inspector.selection.off("new-node-front", this._boundOnNewSelection);
-    delete this._boundOnNewSelection;
+    this._boundOnNewSelection = null;
 
     this.walker.off("mutations", this._boundMutationObserver)
-    delete this._boundMutationObserver;
+    this._boundMutationObserver = null;
 
-    delete this._elt;
+    this._elt.removeEventListener("mousemove", this._showBoxModel, false);
+    this._elt.removeEventListener("mouseleave", this._hideBoxModel, false);
+    this._elt = null;
 
     for (let [key, container] of this._containers) {
       container.destroy();
     }
-    delete this._containers;
+    this._containers = null;
 
     this.tooltip.destroy();
-    delete this.tooltip;
+    this.tooltip = null;
   },
 
   /**

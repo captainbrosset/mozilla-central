@@ -387,9 +387,6 @@ CssHtmlTree.prototype = {
         onItem: (aPropView) => {
           aPropView.refresh();
         },
-        onCancel: () => {
-          deferred.reject("refresh cancelled");
-        },
         onDone: () => {
           this._refreshProcess = null;
           this.noResults.hidden = this.numVisibleProperties > 0;

@@ -1,7 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
- 
+
 .highlighter-container {
   pointer-events: none;
 }
@@ -60,16 +60,7 @@
   direction: ltr;
 }
 
-.highlighter-nodeinfobar-button > .toolbarbutton-text {
-  display: none;
-}
-
-.highlighter-nodeinfobar-container:not([locked]):not(:hover) > .highlighter-nodeinfobar > .highlighter-nodeinfobar-button {
-  visibility: hidden;
-}
-
-.highlighter-nodeinfobar-container[locked] > .highlighter-nodeinfobar,
-.highlighter-nodeinfobar-container:not([locked]):hover > .highlighter-nodeinfobar {
+.highlighter-nodeinfobar-container > .highlighter-nodeinfobar {
   pointer-events: auto;
 }
 

@@ -1319,8 +1319,7 @@ function JSTermHelpers(aOwner)
       }
 
       let toolbox = gDevTools.getToolbox(target);
-      let panel = toolbox ? toolbox.getPanel("inspector") : null;
-      let node = panel ? panel.selection.node : null;
+      let node = toolbox ? toolbox.selection.node : null;
 
       return node ? aOwner.makeDebuggeeValue(node) : null;
     },
